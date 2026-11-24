@@ -1,0 +1,323 @@
+{
+  "entities": {
+    "UserProfilePrivate": {
+      "title": "UserProfilePrivate",
+      "description": "Private analyst user profile isolating PII (email, displayName, photoURL) per user.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 254
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "role": {
+          "type": "string",
+          "enum": ["analyst", "admin"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "displayName", "role", "createdAt", "updatedAt"]
+    },
+    "AdminRole": {
+      "title": "AdminRole",
+      "description": "Server-managed administrator role registry.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 254
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["email", "createdAt"]
+    },
+    "TransactionRecord": {
+      "title": "TransactionRecord",
+      "description": "Audited financial transaction evaluated through the 7-stage FraudShield AI pipeline.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "timestamp": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 64
+        },
+        "amount": {
+          "type": "number"
+        },
+        "currency": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 8,
+          "pattern": "^[A-Z]{3,8}$"
+        },
+        "sender": {
+          "type": "object"
+        },
+        "receiver": {
+          "type": "object"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "wire_transfer",
+            "online_shopping",
+            "crypto_cashout",
+            "pos_terminal",
+            "atm_withdrawal",
+            "p2p_transfer",
+            "upi_payment",
+            "online_banking"
+          ]
+        },
+        "merchant": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Approved", "Flagged", "Blocked", "Under Review", "Pending Verification", "Completed"]
+        },
+        "riskScore": {
+          "type": "number"
+        },
+        "fraudProbability": {
+          "type": "number"
+        },
+        "riskLevel": {
+          "type": "string",
+          "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+        },
+        "riskFactors": {
+          "type": "array"
+        },
+        "mlConfidence": {
+          "type": "number"
+        },
+        "ruleScore": {
+          "type": "number"
+        },
+        "mlScore": {
+          "type": "number"
+        },
+        "preprocessedFeatures": {
+          "type": "object"
+        },
+        "geminiAnalysis": {
+          "type": "object"
+        },
+        "isSimulated": {
+          "type": "boolean"
+        },
+        "processingTimeMs": {
+          "type": "number"
+        },
+        "currentStage": {
+          "type": "number"
+        },
+        "stageHistory": {
+          "type": "array"
+        },
+        "verificationResult": {
+          "type": "object"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "timestamp",
+        "amount",
+        "currency",
+        "sender",
+        "receiver",
+        "category",
+        "merchant",
+        "status",
+        "riskScore",
+        "fraudProbability",
+        "riskLevel",
+        "riskFactors",
+        "mlConfidence",
+        "processingTimeMs",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "FraudRuleRecord": {
+      "title": "FraudRuleRecord",
+      "description": "Configurable heuristic rule persisted per analyst workspace.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 400
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 48
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "weight": {
+          "type": "number"
+        },
+        "condition": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "triggerCount": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "ownerId", "name", "description", "category", "enabled", "weight", "condition", "triggerCount", "createdAt", "updatedAt"]
+    },
+    "ModelConfigRecord": {
+      "title": "ModelConfigRecord",
+      "description": "Persisted ML model algorithm, accuracy metrics, and training history per user.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "algorithm": {
+          "type": "string",
+          "enum": ["RandomForestClassifier", "IsolationForest", "XGBoostClassifier", "LogisticRegression"]
+        },
+        "estimators": {
+          "type": "number"
+        },
+        "accuracy": {
+          "type": "number"
+        },
+        "precision": {
+          "type": "number"
+        },
+        "recall": {
+          "type": "number"
+        },
+        "f1Score": {
+          "type": "number"
+        },
+        "aucRoc": {
+          "type": "number"
+        },
+        "totalTrainedOn": {
+          "type": "number"
+        },
+        "lastTrained": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["ownerId", "algorithm", "accuracy", "precision", "recall", "f1Score", "aucRoc", "totalTrainedOn", "lastTrained", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserProfilePrivate" },
+      "description": "Private user PII and role record readable/writable only by the owning user or admin."
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminRole" },
+      "description": "Read-only client registry of administrator UIDs."
+    },
+    "/transactions/{transactionId}": {
+      "schema": { "$ref": "#/entities/TransactionRecord" },
+      "description": "Persisted 7-stage transaction records scoped by ownerId."
+    },
+    "/fraudRules/{ruleId}": {
+      "schema": { "$ref": "#/entities/FraudRuleRecord" },
+      "description": "Persisted fraud detection rules and custom DSL expressions scoped by ownerId."
+    },
+    "/modelConfigs/{configId}": {
+      "schema": { "$ref": "#/entities/ModelConfigRecord" },
+      "description": "Persisted active ML classifier configuration and performance metrics scoped by ownerId."
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "FraudShield AI - Real-Time Fraud Detection Dashboard",
+  "description": "Industry-grade real-time financial fraud detection system featuring ML prediction models, live transaction streaming, rule-based filtering, Gemini AI risk reasoning, and interactive analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

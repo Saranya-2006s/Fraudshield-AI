@@ -1,0 +1,344 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 4.1: Global Safety Net — default deny everything not explicitly permitted
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- GLOBAL HARDENED HELPER PRIMITIVES ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isVerifiedUser() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'saranyasasikumarsaranya@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isListAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'saranyasasikumarsaranya@gmail.com';
+    }
+
+    // --- ENTITY VALIDATION BLUEPRINTS (Anti-Update-Gap) ---
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'displayName', 'photoURL', 'role', 'createdAt', 'updatedAt'])
+        && isValidId(data.uid)
+        && data.uid == request.auth.uid
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 254
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1000))
+        && data.role is string && data.role.size() <= 20 && data.role in ['analyst', 'admin']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSenderMap(sender) {
+      return sender is map
+        && sender.keys().hasAll(['id', 'name', 'account', 'country', 'deviceId', 'ipAddress', 'avgTransactionAmount'])
+        && sender.keys().hasOnly(['id', 'name', 'account', 'country', 'location', 'deviceId', 'deviceType', 'ipAddress', 'avgTransactionAmount'])
+        && sender.id is string && sender.id.size() >= 1 && sender.id.size() <= 64
+        && sender.name is string && sender.name.size() >= 1 && sender.name.size() <= 120
+        && sender.account is string && sender.account.size() >= 1 && sender.account.size() <= 40
+        && sender.country is string && sender.country.size() >= 2 && sender.country.size() <= 16
+        && (!('location' in sender) || (sender.location is string && sender.location.size() <= 160))
+        && sender.deviceId is string && sender.deviceId.size() >= 1 && sender.deviceId.size() <= 80
+        && (!('deviceType' in sender) || (sender.deviceType is string && sender.deviceType.size() <= 60))
+        && sender.ipAddress is string && sender.ipAddress.size() >= 1 && sender.ipAddress.size() <= 64
+        && sender.avgTransactionAmount is number && sender.avgTransactionAmount >= 0;
+    }
+
+    function isValidReceiverMap(receiver) {
+      return receiver is map
+        && receiver.keys().hasAll(['id', 'name', 'account', 'bank', 'country'])
+        && receiver.keys().hasOnly(['id', 'name', 'account', 'bank', 'country', 'location'])
+        && receiver.id is string && receiver.id.size() >= 1 && receiver.id.size() <= 64
+        && receiver.name is string && receiver.name.size() >= 1 && receiver.name.size() <= 160
+        && receiver.account is string && receiver.account.size() >= 1 && receiver.account.size() <= 40
+        && receiver.bank is string && receiver.bank.size() >= 1 && receiver.bank.size() <= 160
+        && receiver.country is string && receiver.country.size() >= 2 && receiver.country.size() <= 16
+        && (!('location' in receiver) || (receiver.location is string && receiver.location.size() <= 160));
+    }
+
+    function isValidGeminiMap(ga) {
+      return ga is map
+        && ga.keys().hasAll(['summary', 'reasoning', 'recommendation', 'fraudPatternMatched', 'riskScoreAdjustment'])
+        && ga.keys().hasOnly(['summary', 'reasoning', 'recommendation', 'fraudPatternMatched', 'riskScoreAdjustment', 'source', 'cached'])
+        && ga.summary is string && ga.summary.size() <= 2000
+        && ga.reasoning is list && ga.reasoning.size() >= 1 && ga.reasoning.size() <= 10
+        && ga.reasoning[0] is string && ga.reasoning[0].size() <= 500
+        && ga.recommendation is string && ga.recommendation.size() <= 40
+        && ga.recommendation in ['ALLOW', 'STEP_UP_AUTH', 'FREEZE_ACCOUNT', 'BLOCK_TRANSACTION', 'MANUAL_VERIFICATION']
+        && ga.fraudPatternMatched is string && ga.fraudPatternMatched.size() <= 160
+        && ga.riskScoreAdjustment is number
+        && (!('source' in ga) || (ga.source is string && ga.source.size() <= 80))
+        && (!('cached' in ga) || ga.cached is bool);
+    }
+
+    function isValidVerificationMap(vr) {
+      return vr is map
+        && vr.keys().hasAll(['decision'])
+        && vr.keys().hasOnly(['reviewedBy', 'decision', 'notes', 'verifiedAt'])
+        && vr.decision is string && vr.decision.size() <= 32
+        && vr.decision in ['GENUINE_APPROVED', 'FRAUD_BLOCKED', 'PENDING']
+        && (!('reviewedBy' in vr) || (vr.reviewedBy is string && vr.reviewedBy.size() <= 120))
+        && (!('notes' in vr) || (vr.notes is string && vr.notes.size() <= 500))
+        && (!('verifiedAt' in vr) || (vr.verifiedAt is string && vr.verifiedAt.size() <= 64));
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasAll([
+          'id', 'ownerId', 'timestamp', 'amount', 'currency',
+          'sender', 'receiver', 'category', 'merchant', 'status',
+          'riskScore', 'fraudProbability', 'riskLevel', 'riskFactors',
+          'mlConfidence', 'processingTimeMs', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'ownerId', 'timestamp', 'amount', 'currency',
+          'sender', 'receiver', 'category', 'merchant', 'status',
+          'riskScore', 'fraudProbability', 'riskLevel', 'riskFactors',
+          'mlConfidence', 'ruleScore', 'mlScore', 'preprocessedFeatures',
+          'geminiAnalysis', 'isSimulated', 'processingTimeMs',
+          'currentStage', 'stageHistory', 'verificationResult',
+          'createdAt', 'updatedAt'
+        ])
+        && data.id is string && data.id.size() >= 2 && data.id.size() <= 64 && data.id.matches('^[a-zA-Z0-9_\\-]+$')
+        && isValidId(data.ownerId)
+        && data.timestamp is string && data.timestamp.size() >= 10 && data.timestamp.size() <= 64
+        && data.amount is number && data.amount > 0
+        && data.currency is string && data.currency.size() >= 3 && data.currency.size() <= 8 && data.currency.matches('^[A-Z]{3,8}$')
+        && isValidSenderMap(data.sender)
+        && isValidReceiverMap(data.receiver)
+        && data.category is string && data.category.size() <= 40
+        && data.category in ['wire_transfer', 'online_shopping', 'crypto_cashout', 'pos_terminal', 'atm_withdrawal', 'p2p_transfer', 'upi_payment', 'online_banking']
+        && data.merchant is string && data.merchant.size() >= 1 && data.merchant.size() <= 160
+        && data.status is string && data.status.size() <= 32
+        && data.status in ['Approved', 'Flagged', 'Blocked', 'Under Review', 'Pending Verification', 'Completed']
+        && data.riskScore is number && data.riskScore >= 0 && data.riskScore <= 100
+        && data.fraudProbability is number && data.fraudProbability >= 0 && data.fraudProbability <= 100
+        && data.riskLevel is string && data.riskLevel.size() <= 16 && data.riskLevel in ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
+        && data.riskFactors is list && data.riskFactors.size() >= 1 && data.riskFactors.size() <= 16
+        && data.riskFactors[0] is string && data.riskFactors[0].size() <= 300
+        && data.mlConfidence is number && data.mlConfidence >= 0 && data.mlConfidence <= 1
+        && data.processingTimeMs is number && data.processingTimeMs >= 0
+        && (!('ruleScore' in data) || (data.ruleScore is number && data.ruleScore >= 0))
+        && (!('mlScore' in data) || (data.mlScore is number && data.mlScore >= 0 && data.mlScore <= 100))
+        && (!('preprocessedFeatures' in data) || data.preprocessedFeatures is map)
+        && (!('geminiAnalysis' in data) || isValidGeminiMap(data.geminiAnalysis))
+        && (!('isSimulated' in data) || data.isSimulated is bool)
+        && (!('currentStage' in data) || (data.currentStage is number && data.currentStage >= 1 && data.currentStage <= 7))
+        && (!('stageHistory' in data) || (data.stageHistory is list && data.stageHistory.size() >= 1 && data.stageHistory.size() <= 7 && data.stageHistory[0] is map))
+        && (!('verificationResult' in data) || isValidVerificationMap(data.verificationResult))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidFraudRule(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'name', 'description', 'category', 'enabled', 'weight', 'condition', 'triggerCount', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'ownerId', 'name', 'description', 'category', 'enabled', 'weight', 'condition', 'triggerCount', 'createdAt', 'updatedAt'])
+        && data.id is string && data.id.size() >= 2 && data.id.size() <= 64 && data.id.matches('^[a-zA-Z0-9_\\-]+$')
+        && isValidId(data.ownerId)
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && data.description is string && data.description.size() <= 400
+        && data.category is string && data.category.size() >= 1 && data.category.size() <= 48
+        && data.enabled is bool
+        && data.weight is number && data.weight >= 1 && data.weight <= 100
+        && data.condition is string && data.condition.size() >= 1 && data.condition.size() <= 300
+        && data.triggerCount is number && data.triggerCount >= 0
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidModelConfig(data) {
+      return data.keys().hasAll(['ownerId', 'algorithm', 'accuracy', 'precision', 'recall', 'f1Score', 'aucRoc', 'totalTrainedOn', 'lastTrained', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'algorithm', 'estimators', 'accuracy', 'precision', 'recall', 'f1Score', 'aucRoc', 'totalTrainedOn', 'lastTrained', 'createdAt', 'updatedAt'])
+        && isValidId(data.ownerId)
+        && data.algorithm is string && data.algorithm.size() <= 40
+        && data.algorithm in ['RandomForestClassifier', 'IsolationForest', 'XGBoostClassifier', 'LogisticRegression']
+        && (!('estimators' in data) || (data.estimators is number && data.estimators >= 10 && data.estimators <= 1000))
+        && data.accuracy is number && data.accuracy >= 0 && data.accuracy <= 100
+        && data.precision is number && data.precision >= 0 && data.precision <= 100
+        && data.recall is number && data.recall >= 0 && data.recall <= 100
+        && data.f1Score is number && data.f1Score >= 0 && data.f1Score <= 100
+        && data.aucRoc is number && data.aucRoc >= 0 && data.aucRoc <= 1
+        && data.totalTrainedOn is number && data.totalTrainedOn >= 1
+        && data.lastTrained is string && data.lastTrained.size() <= 64
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // --- COLLECTIONS ---
+
+    // 1. Admin Registry (Server-only writes)
+    match /admins/{adminId} {
+      allow get: if isValidId(adminId) && (isOwner(adminId) || isAdmin());
+      allow list: if isListAdmin();
+      allow write: if false;
+    }
+
+    // 2. Private User PII Profiles (Split Collection Isolation)
+    match /users/{userId}/private/{docId} {
+      allow get: if isValidId(userId) && isValidId(docId) && isVerifiedUser() && (isOwner(userId) || isAdmin());
+      allow list: if isValidId(userId) && (isOwner(userId) || isListAdmin());
+
+      allow create: if isValidId(userId)
+        && isValidId(docId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming())
+        && incoming().role == 'analyst'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isValidId(userId)
+        && isValidId(docId)
+        && isValidUserProfile(incoming())
+        && (isOwner(userId) || isAdmin())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (
+            incoming().role == existing().role &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt'])
+          )
+        );
+
+      allow delete: if isValidId(userId) && isValidId(docId) && isAdmin();
+    }
+
+    // 3. Audited Transactions Collection (7-Stage Pipeline Persistence)
+    match /transactions/{transactionId} {
+      function isVerifiedTerminal() {
+        return ('verificationResult' in existing())
+          && existing().verificationResult is map
+          && existing().verificationResult.decision in ['GENUINE_APPROVED', 'FRAUD_BLOCKED'];
+      }
+
+      allow get: if isValidId(transactionId) && isVerifiedUser() && (
+        (resource == null && request.auth.uid.size() >= 20 && transactionId.size() > 21 && transactionId[0:20] == request.auth.uid[0:20]) ||
+        (resource != null && existing().ownerId == request.auth.uid) ||
+        isAdmin()
+      );
+      allow list: if isVerifiedUser() && (existing().ownerId == request.auth.uid || isListAdmin());
+
+      allow create: if isValidId(transactionId)
+        && isVerifiedUser()
+        && isValidTransaction(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isValidId(transactionId)
+        && isVerifiedUser()
+        && isValidTransaction(incoming())
+        && (existing().ownerId == request.auth.uid || isAdmin())
+        && incoming().id == existing().id
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (
+            // Action A: Attach Gemini AI Explainable Analysis
+            incoming().diff(existing()).affectedKeys().hasOnly(['geminiAnalysis', 'updatedAt'])
+          ) ||
+          (
+            // Action B: Stage 5 Verification Decision (blocked once verified terminal)
+            !isVerifiedTerminal()
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'riskLevel', 'currentStage', 'stageHistory', 'verificationResult', 'updatedAt'])
+          )
+        );
+
+      allow delete: if isValidId(transactionId) && isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // 4. Configurable Fraud Rules Engine Collection
+    match /fraudRules/{ruleId} {
+      allow get: if isValidId(ruleId) && isVerifiedUser() && (
+        (resource == null && request.auth.uid.size() >= 20 && ruleId.size() > 21 && ruleId[0:20] == request.auth.uid[0:20]) ||
+        (resource != null && existing().ownerId == request.auth.uid) ||
+        isAdmin()
+      );
+      allow list: if isVerifiedUser() && (existing().ownerId == request.auth.uid || isListAdmin());
+
+      allow create: if isValidId(ruleId)
+        && isVerifiedUser()
+        && isValidFraudRule(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isValidId(ruleId)
+        && isVerifiedUser()
+        && isValidFraudRule(incoming())
+        && (existing().ownerId == request.auth.uid || isAdmin())
+        && incoming().id == existing().id
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['enabled', 'updatedAt']) ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['weight', 'updatedAt']) ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['triggerCount', 'updatedAt']) ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['enabled', 'weight', 'triggerCount', 'name', 'description', 'category', 'condition', 'updatedAt'])
+        );
+
+      allow delete: if isValidId(ruleId) && isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // 5. ML Model Configuration & Metrics Collection
+    match /modelConfigs/{configId} {
+      allow get: if isValidId(configId) && isVerifiedUser() && ((resource == null && isOwner(configId)) || (resource != null && existing().ownerId == request.auth.uid) || isAdmin());
+      allow list: if isVerifiedUser() && (existing().ownerId == request.auth.uid || isListAdmin());
+
+      allow create: if isValidId(configId)
+        && isVerifiedUser()
+        && configId == request.auth.uid
+        && isValidModelConfig(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isValidId(configId)
+        && isVerifiedUser()
+        && isValidModelConfig(incoming())
+        && (existing().ownerId == request.auth.uid || isAdmin())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'algorithm', 'estimators', 'accuracy', 'precision', 'recall', 'f1Score', 'aucRoc', 'totalTrainedOn', 'lastTrained', 'updatedAt'
+          ])
+        );
+
+      allow delete: if isValidId(configId) && isVerifiedUser() && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+  }
+}
